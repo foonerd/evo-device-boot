@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated PNG frames are committed by default so the install path
+# does not require Pillow on every target. Uncomment the next line if
+# you prefer to keep the assets out of git and always render at install
+# time.
+# plymouth/assets/*.png
+
+# Editor cruft
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+
+# Local preview output from tools/render-frames.py composite step.
+# Throwaway; we re-render on demand.
+.preview/
+
+# Packaging output
+packaging/debian/build/
+*.deb
+*.buildinfo
+*.changes

@@ -1,0 +1,2 @@
+# This directory is populated by tools/render-frames.py.
+# scripts/install.sh will render automatically on first install.
