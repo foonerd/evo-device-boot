@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=evo
+Description=evo boot identity - beating heart
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/evo/assets
+ScriptFile=/usr/share/plymouth/themes/evo/evo.script

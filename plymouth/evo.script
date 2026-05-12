@@ -1,0 +1,115 @@
+# evo plymouth theme
+# A beating heart, centred, on a dark base. No text, no mode logic,
+# no script-side rotation. The shape is a rounded square so the only
+# thing that "rotates" with the panel is the gradient direction, which
+# is a quiet aesthetic, not a problem.
+#
+# Rhythm: lub-dub at 1.5s/cycle, 30 fps -> 45 frames/cycle.
+# Layers (back to front): bg, ring1, ring2, glyph.
+#
+# Source of truth for the animation curve, colours and ring profile:
+# tools/render-frames.py at the top of this repo. Re-render PNGs
+# there if the brand parameters ever shift.
+#
+# See DESIGN.md for the asset strategy and the boot chain.
+
+# -------- config --------
+fps              = 30;
+frames_per_cycle = 45;
+
+# Target proportion of the SMALLER screen dimension that the glyph
+# should occupy. Keeps the heart visually consistent across panels.
+glyph_target_pct = 0.17;
+
+# -------- screen geometry --------
+screen_w = Window.GetWidth();
+screen_h = Window.GetHeight();
+
+# screen_min = min(screen_w, screen_h)
+screen_min = screen_w;
+if (screen_h < screen_w) {
+  screen_min = screen_h;
+}
+
+# -------- background --------
+# Solid dark base matches the site's --background colour so the boot
+# to UI handoff does not flash a colour change.
+bg_image  = Image("bg.png");
+bg_sprite = Sprite(bg_image);
+bg_sprite.SetX(0);
+bg_sprite.SetY(0);
+bg_sprite.SetZ(-10);
+
+# -------- helpers --------
+fun pad2 (n) {
+  if (n < 10) {
+    return "0" + n;
+  }
+  return "" + n;
+}
+
+# -------- load frame sequences --------
+glyph_frames = [];
+ring1_frames = [];
+ring2_frames = [];
+
+for (i = 0; i < frames_per_cycle; i++) {
+  glyph_frames[i] = Image("glyph-" + pad2(i) + ".png");
+  ring1_frames[i] = Image("ring1-" + pad2(i) + ".png");
+  ring2_frames[i] = Image("ring2-" + pad2(i) + ".png");
+}
+
+# -------- responsive scaling --------
+# Asset canvas is 640x640 with a 240 px glyph at native scale, set in
+# tools/render-frames.py. Compute one screen-side scale factor and
+# apply it once to every sprite. Per-frame scaling would be too slow
+# in initramfs; one-shot startup scaling is essentially free.
+canvas_native    = 640;
+glyph_native     = 240;
+glyph_target_px  = screen_min * glyph_target_pct;
+asset_scale      = glyph_target_px / glyph_native;
+canvas_scaled_px = canvas_native * asset_scale;
+
+if (asset_scale < 0.99 || asset_scale > 1.01) {
+  for (i = 0; i < frames_per_cycle; i++) {
+    glyph_frames[i] = glyph_frames[i].Scale(canvas_scaled_px, canvas_scaled_px);
+    ring1_frames[i] = ring1_frames[i].Scale(canvas_scaled_px, canvas_scaled_px);
+    ring2_frames[i] = ring2_frames[i].Scale(canvas_scaled_px, canvas_scaled_px);
+  }
+}
+
+# -------- sprites --------
+# Construct sprites WITH their first frame so the heart is visible on
+# the very first paint, before the refresh callback fires.
+sprite_w = glyph_frames[0].GetWidth();
+sprite_h = glyph_frames[0].GetHeight();
+sprite_x = (screen_w - sprite_w) / 2;
+sprite_y = (screen_h - sprite_h) / 2;
+
+ring1_sprite = Sprite(ring1_frames[0]);
+ring2_sprite = Sprite(ring2_frames[0]);
+glyph_sprite = Sprite(glyph_frames[0]);
+
+ring1_sprite.SetX(sprite_x);
+ring1_sprite.SetY(sprite_y);
+ring1_sprite.SetZ(0);
+
+ring2_sprite.SetX(sprite_x);
+ring2_sprite.SetY(sprite_y);
+ring2_sprite.SetZ(1);
+
+glyph_sprite.SetX(sprite_x);
+glyph_sprite.SetY(sprite_y);
+glyph_sprite.SetZ(2);
+
+# -------- frame loop --------
+frame = 0;
+
+fun refresh () {
+  glyph_sprite.SetImage(glyph_frames[frame]);
+  ring1_sprite.SetImage(ring1_frames[frame]);
+  ring2_sprite.SetImage(ring2_frames[frame]);
+  frame = (frame + 1) % frames_per_cycle;
+}
+
+Plymouth.SetRefreshFunction(refresh);
