@@ -1,0 +1,16 @@
+[Unit]
+Description=evo-device-boot splash warmup (holds Plymouth splash for a moment)
+Documentation=https://github.com/evoframework/evo-device-boot
+DefaultDependencies=no
+After=plymouth-start.service
+Before=plymouth-quit.service plymouth-quit-wait.service
+Requires=plymouth-start.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sleep __HOLD_SECONDS__
+TimeoutStartSec=30
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target graphical.target
