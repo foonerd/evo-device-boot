@@ -248,6 +248,29 @@ install_retain_splash_dropin() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 2d - install the on-device verify.sh triage helper
+# ---------------------------------------------------------------------------
+#
+# Ships verify.sh to /usr/local/share/evo-device-boot/scripts/verify.sh so
+# on-device triage is a one-liner (`sudo /usr/local/share/evo-device-boot/
+# scripts/verify.sh`) instead of a wget/scp cycle. The script has no
+# runtime dependencies (bash + systemctl + grep) and is safe to invoke at
+# any point post-install.
+
+VERIFY_SCRIPT_SRC="$REPO_DIR/scripts/verify.sh"
+VERIFY_SCRIPT_DST_DIR="/usr/local/share/evo-device-boot/scripts"
+VERIFY_SCRIPT_DST="$VERIFY_SCRIPT_DST_DIR/verify.sh"
+
+install_verify_script() {
+  if [ ! -f "$VERIFY_SCRIPT_SRC" ]; then
+    die "verify.sh not found at $VERIFY_SCRIPT_SRC" 2
+  fi
+  log "installing verify.sh to $VERIFY_SCRIPT_DST"
+  install -d -m 0755 "$VERIFY_SCRIPT_DST_DIR"
+  install -m 0755 "$VERIFY_SCRIPT_SRC" "$VERIFY_SCRIPT_DST"
+}
+
+# ---------------------------------------------------------------------------
 # Step 3 - select theme + (optionally) rebuild initramfs
 # ---------------------------------------------------------------------------
 
@@ -439,6 +462,7 @@ ensure_assets
 install_theme
 install_warmup_unit
 install_retain_splash_dropin
+install_verify_script
 select_theme
 apply_cmdline
 verify
