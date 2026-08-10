@@ -38,6 +38,11 @@ if [ -f "$WARMUP_UNIT_DST" ]; then
   check "warmup unit sleep value present" "grep -q 'ExecStart=/bin/sleep' '$WARMUP_UNIT_DST'"
 fi
 
+RETAIN_DROPIN_DST="/etc/systemd/system/plymouth-quit.service.d/10-evo-retain-splash.conf"
+check "retain-splash drop-in present" "[ -f '$RETAIN_DROPIN_DST' ]"
+check "retain-splash drop-in active in effective unit" \
+  "systemctl show -p ExecStart --value plymouth-quit.service 2>/dev/null | grep -q -- '--retain-splash'"
+
 if command -v plymouth-set-default-theme >/dev/null 2>&1; then
   cur=$(plymouth-set-default-theme 2>/dev/null || echo "")
   check "default theme is $THEME_NAME" "[ '$cur' = '$THEME_NAME' ]"

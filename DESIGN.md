@@ -210,6 +210,34 @@ initramfs), `evo-splash-warmup.service` finishes well before
 plymouth-quit would have fired anyway and the unit is a no-op. One
 knob, one default, two correct behaviours.
 
+## Seamless handoff (retain-splash)
+
+Holding the splash for N seconds is only half the transition. The other
+half is what the panel shows AFTER `plymouth-quit.service` fires but
+BEFORE the compositor paints. The stock `plymouth quit` tears the splash
+down to a blank console; if the kiosk compositor is not up yet, the panel
+shows bare console until it is. On a reference Pi 5 this gap measured ~9s,
+because the kiosk was gated on `network-online.target`
+(`NetworkManager-wait-online` alone cost ~8.5s) even though it loads only
+the loopback UI.
+
+Two coordinated fixes close it:
+
+1. A drop-in (`systemd/plymouth-quit-retain-splash.conf`, installed to
+   `plymouth-quit.service.d/10-evo-retain-splash.conf`) replaces
+   `plymouth quit` with `plymouth quit --retain-splash`. The last splash
+   frame stays in the framebuffer and plymouthd drops DRM master without
+   restoring the console, so the retained image holds until the
+   compositor's first modeset paints over it - a seamless dissolve, no
+   black frame, however long the compositor takes.
+2. The kiosk (`evo-kiosk-eng`) and the UI runtime (`evo-ui.service`) are
+   re-gated off `network-online.target` onto the loopback server + DRM, so
+   the gap the retained splash must cover is a second or two rather than
+   the ~9s the network-online wait imposed.
+
+Retain-splash is the correctness half (never a blank frame); the re-gating
+is the quality half (keep the covered gap short).
+
 ## Future work
 
 - fbcon-logo/ - the LOGO_LINUX_CLUT224 PPM the kernel draws during

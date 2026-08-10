@@ -227,6 +227,27 @@ install_warmup_unit() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 2c - seamless handoff: plymouth-quit --retain-splash drop-in
+# ---------------------------------------------------------------------------
+#
+# Keeps the last splash frame on the panel (instead of a blank console)
+# until the compositor paints over it - no black gap between splash and UI.
+
+RETAIN_DROPIN_DIR="/etc/systemd/system/plymouth-quit.service.d"
+RETAIN_DROPIN_DST="$RETAIN_DROPIN_DIR/10-evo-retain-splash.conf"
+RETAIN_DROPIN_SRC="$REPO_DIR/systemd/plymouth-quit-retain-splash.conf"
+
+install_retain_splash_dropin() {
+  if [ ! -f "$RETAIN_DROPIN_SRC" ]; then
+    die "retain-splash drop-in not found at $RETAIN_DROPIN_SRC" 2
+  fi
+  log "installing plymouth-quit --retain-splash drop-in"
+  install -d -m 0755 "$RETAIN_DROPIN_DIR"
+  install -m 0644 "$RETAIN_DROPIN_SRC" "$RETAIN_DROPIN_DST"
+  systemctl daemon-reload
+}
+
+# ---------------------------------------------------------------------------
 # Step 3 - select theme + (optionally) rebuild initramfs
 # ---------------------------------------------------------------------------
 
@@ -417,6 +438,7 @@ ensure_prereqs
 ensure_assets
 install_theme
 install_warmup_unit
+install_retain_splash_dropin
 select_theme
 apply_cmdline
 verify
