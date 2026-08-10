@@ -287,6 +287,51 @@ patch_pi_cmdline_tokens() {
   else
     log "$f already has all required tokens"
   fi
+  redirect_fb_console "$f"
+}
+
+# ---------------------------------------------------------------------------
+# Step 4a' - move the framebuffer console OFF the visible VT
+# ---------------------------------------------------------------------------
+#
+# The seamless-handoff contract (retain-splash) assumes nothing repaints
+# the panel between `plymouth quit` and the compositor's first frame. That
+# assumption only holds if the kernel's framebuffer console (fbcon) is NOT
+# bound to the visible VT. With the stock image's `console=tty1` (Pi) /
+# `console=tty0` (grub default), fbcon owns the on-screen VT: the instant
+# `plymouth quit --retain-splash` drops DRM master, fbcon regains the
+# framebuffer and repaints the text console (the "TTY + quit ok" the tester
+# saw) straight over the retained splash. Retain-splash cannot win that.
+#
+# Fix: point the VT console at an unused terminal (tty3). Serial consoles
+# (ttyAMA*, ttyS*, ttyUSB*) are preserved - only the VT-number console is
+# moved. plymouthd and labwc drive DRM/KMS directly and do not need the
+# console on tty1. getty is kept off the visible VT by the kiosk unit
+# (Conflicts=getty@tty1); this closes the other repaint path (fbcon).
+FB_CONSOLE_VT="tty3"
+
+# Rewrite any `console=ttyN` (VT-number console) token in the passed file
+# to console=$FB_CONSOLE_VT; append it if no VT console is present. Only
+# touches numeric-VT consoles - ttyAMA10/ttyS0/ttyUSB0 are left intact.
+redirect_fb_console() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  local cur
+  cur="$(cat "$f")"
+  case " $cur " in
+    *" console=$FB_CONSOLE_VT "*)
+      log "$f: framebuffer console already on $FB_CONSOLE_VT"
+      return 0
+      ;;
+  esac
+  cp "$f" "$f.evo-boot.bak.$(date +%s)"
+  if printf '%s' "$cur" | grep -qE '(^| )console=tty[0-9]+( |$)'; then
+    sed -i -E "s/(^| )console=tty[0-9]+( |\$)/\1console=$FB_CONSOLE_VT\2/g" "$f"
+    log "$f: redirected framebuffer console to $FB_CONSOLE_VT (was a visible VT)"
+  else
+    sed -i "1s|\$| console=$FB_CONSOLE_VT|" "$f"
+    log "$f: appended console=$FB_CONSOLE_VT"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -362,8 +407,11 @@ patch_grub() {
     log "no $f, skipping grub patch"
     return 0
   fi
-  local want='quiet splash vt.global_cursor_default=0'
-  if grep -qE "^GRUB_CMDLINE_LINUX_DEFAULT=\".*${want}.*\"" "$f"; then
+  # console=tty3 moves the framebuffer console off the visible VT so fbcon
+  # cannot repaint console text over the retained splash - see
+  # redirect_fb_console() for the full rationale (same defect, grub path).
+  local want='quiet splash vt.global_cursor_default=0 console=tty3'
+  if grep -qE "^GRUB_CMDLINE_LINUX_DEFAULT=\".*quiet splash.*console=tty3.*\"" "$f"; then
     log "$f already has the required cmdline tokens"
     return 0
   fi
@@ -425,6 +473,20 @@ verify() {
       || die "splash warmup unit missing at $WARMUP_UNIT_DST"
     systemctl is-enabled "$WARMUP_UNIT_NAME" >/dev/null 2>&1 \
       || die "splash warmup unit is installed but not enabled"
+  fi
+  # Retain-splash drop-in must be effective, else the handoff shows console.
+  [ -f "$RETAIN_DROPIN_DST" ] \
+    || die "retain-splash drop-in missing at $RETAIN_DROPIN_DST"
+  # The framebuffer console must be OFF the visible VT (see
+  # redirect_fb_console). Check the persisted boot config; effective next
+  # boot. A visible-VT console here means fbcon can repaint the splash.
+  if [ "$EVO_BOOT_SKIP_CMDLINE" != "1" ]; then
+    local bootcfg=""
+    [ -f /boot/firmware/cmdline.txt ] && bootcfg="/boot/firmware/cmdline.txt"
+    [ -z "$bootcfg" ] && [ -f /etc/default/grub ] && bootcfg="/etc/default/grub"
+    if [ -n "$bootcfg" ] && grep -qE 'console=tty[012]( |"|$)' "$bootcfg"; then
+      die "framebuffer console still on a visible VT in $bootcfg (fbcon will repaint the splash); expected console=tty3"
+    fi
   fi
   log "ok - active theme is $THEME_NAME on $(detect_arch)"
 }

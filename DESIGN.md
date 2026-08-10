@@ -67,6 +67,10 @@ Required /boot/firmware/cmdline.txt additions (one line, space-separated):
 
     quiet splash plymouth.ignore-serial-consoles vt.global_cursor_default=0
 
+plus the framebuffer console moved off the visible VT (a stock `console=tty1`
+is rewritten to `console=tty3`; serial consoles are left intact) - see
+"Seamless handoff" below for why this is load-bearing.
+
 Required /boot/firmware/config.txt additions:
 
     disable_splash=1
@@ -83,9 +87,10 @@ Required /boot/firmware/config.txt additions:
 
 Required /etc/default/grub:
 
-    GRUB_CMDLINE_LINUX_DEFAULT="quiet splash vt.global_cursor_default=0"
+    GRUB_CMDLINE_LINUX_DEFAULT="quiet splash vt.global_cursor_default=0 console=tty3"
 
-Followed by `update-grub`.
+Followed by `update-grub`. (`console=tty3` keeps fbcon off the visible VT -
+see "Seamless handoff".)
 
 ### Initramfs
 
@@ -221,7 +226,7 @@ because the kiosk was gated on `network-online.target`
 (`NetworkManager-wait-online` alone cost ~8.5s) even though it loads only
 the loopback UI.
 
-Two coordinated fixes close it:
+Three coordinated fixes close it:
 
 1. A drop-in (`systemd/plymouth-quit-retain-splash.conf`, installed to
    `plymouth-quit.service.d/10-evo-retain-splash.conf`) replaces
@@ -230,13 +235,29 @@ Two coordinated fixes close it:
    restoring the console, so the retained image holds until the
    compositor's first modeset paints over it - a seamless dissolve, no
    black frame, however long the compositor takes.
-2. The kiosk (`evo-kiosk-eng`) and the UI runtime (`evo-ui.service`) are
+2. The framebuffer console is moved OFF the visible VT (`console=tty3`).
+   This is load-bearing, not cosmetic: retain-splash drops DRM master, and
+   if fbcon is bound to the on-screen VT (the stock `console=tty1` on Pi /
+   `console=tty0` under grub) it reclaims the framebuffer the instant DRM
+   master is released and repaints the text console - the "TTY + plymouth
+   quit ok" text seen on screen - straight over the retained splash.
+   Retain-splash cannot win that race; the only fix is that fbcon must not
+   own the visible VT. Serial consoles (ttyAMA*, ttyS*) are preserved;
+   plymouthd and labwc drive DRM/KMS directly and never need the console on
+   tty1. The stock image's `No fbcon-fallback handling` assumption (above)
+   only holds once this redirect is in place. Applied by
+   `redirect_fb_console()` (Pi cmdline.txt) and `patch_grub()` (amd64).
+3. The kiosk (`evo-kiosk-eng`) and the UI runtime (`evo-ui.service`) are
    re-gated off `network-online.target` onto the loopback server + DRM, so
    the gap the retained splash must cover is a second or two rather than
-   the ~9s the network-online wait imposed.
+   the ~9s the network-online wait imposed. The kiosk also
+   `Conflicts=getty@tty1.service` and starts early, closing the *other*
+   repaint path (a getty login prompt flashing on tty1 in the gap).
 
-Retain-splash is the correctness half (never a blank frame); the re-gating
-is the quality half (keep the covered gap short).
+Fixes 1+2 are the correctness half (never a blank/console frame); the
+re-gating is the quality half (keep the covered gap short). All three are
+required: retain-splash alone still shows console text while fbcon owns the
+visible VT.
 
 ## Future work
 
