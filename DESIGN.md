@@ -238,6 +238,65 @@ Two coordinated fixes close it:
 Retain-splash is the correctness half (never a blank frame); the re-gating
 is the quality half (keep the covered gap short).
 
+### Rollout amendment: DM-shape handoff supersedes the drop-in
+
+The retain-splash drop-in is the TRANSITIONAL shape. The MATURE shape
+follows the mainstream display-manager pattern (GDM, SDDM): the display
+server itself owns the plymouth-quit moment, not a free-running systemd
+unit. Both shapes achieve the same "no blank frame" invariant; the DM
+shape is more robust when the compositor takes several seconds to bring
+its DRM master up (which can happen on VM targets, slow Pi bring-up, or
+labwc first-modeset paths that fire `wlr-randr` after `exec`).
+
+The DM shape lives in `evo-kiosk-eng` and looks like this:
+
+    # evo-kiosk.service
+    [Unit]
+    Conflicts=getty@tty1.service plymouth-quit.service
+    After=plymouth-quit.service plymouth-start.service
+    OnFailure=plymouth-quit.service
+
+Kiosk's launch helper then wraps the compositor lifetime:
+
+    preflight (DRM only, no sock wait, no HTTP wait)
+    plymouth deactivate         # keep splash FB, drop DRM master
+    exec labwc -S evo-session
+      # after labwc's first successful output layout:
+      plymouth quit --retain-splash
+      # then start OSK / browser
+
+`Conflicts=plymouth-quit.service` prevents the free-running quit from
+racing kiosk startup; `OnFailure=plymouth-quit.service` covers the case
+where kiosk crashes before it calls quit itself (would otherwise leave
+plymouth stuck holding DRM master with the compositor never coming up —
+a documented GDM failure mode, and the reason they added the same
+`OnFailure=`).
+
+Rollout invariant: **do not ship the kiosk `Conflicts=plymouth-quit`
+without shipping deactivate + quit in the kiosk-launch helper in the
+same release**. Half-shipped `Conflicts` = plymouth never quits = stuck
+splash. This is half-GDM and is a known bad state.
+
+During the transition, both shapes coexist safely: the drop-in makes
+`plymouth-quit.service`'s ExecStart the retain-splash form, so even if
+the free-running unit fires (kiosk's `Conflicts` not yet in force, or
+kiosk hits `OnFailure=`), the result is still a retained framebuffer,
+not a bare console.
+
+Once every screened image ships the DM shape, the retain-splash drop-in
+becomes optional fallback — kept for non-kiosk boots (dev boxes,
+headless targets where a compositor never comes up) but no longer the
+primary handoff owner. `evo-device-boot`'s `install.sh` continues to
+install the drop-in for that fallback role until removed by a follow-on
+release note.
+
+`verify.sh` reflects the transition by accepting EITHER the drop-in OR
+the kiosk `Conflicts=plymouth-quit` as a valid handoff owner (one MUST
+be present; both is safe), and independently checks the VT-safe kiosk
+flags (`TTYReset=no`, `TTYVTDisallocate=no`, `TTYPath=/dev/tty1`) plus
+the "no `network-online` in `After=`" ordering that the seamless gap
+depends on.
+
 ## Future work
 
 - fbcon-logo/ - the LOGO_LINUX_CLUT224 PPM the kernel draws during

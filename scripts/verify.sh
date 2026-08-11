@@ -65,6 +65,68 @@ if [ -f /etc/default/grub ]; then
   check "grub cmdline has cursor=0"        "grep -q 'GRUB_CMDLINE_LINUX_DEFAULT=.*vt.global_cursor_default=0' /etc/default/grub"
 fi
 
+# ---------------------------------------------------------------------------
+# Kiosk-side handoff invariants (checked only when evo-kiosk.service is
+# installed — headless targets legitimately have no kiosk unit and are
+# skipped without failing the run).
+#
+# The seamless Plymouth -> kiosk handoff requires either:
+#   (a) Framework retain-splash drop-in (already checked above) — the
+#       transitional shape where evo-device-boot free-runs the quit and
+#       the compositor covers the retained frame before the FB is
+#       reclaimed.
+#   (b) Kiosk-owned Plymouth quit — the DM shape (GDM/SDDM pattern) in
+#       which evo-kiosk.service `Conflicts=plymouth-quit.service` +
+#       `OnFailure=plymouth-quit.service`, and evo-kiosk-launch calls
+#       `plymouth deactivate` before exec labwc and `plymouth quit
+#       --retain-splash` after first frame.
+# One of these MUST hold. Both are safe to coexist during rollout.
+#
+# Regardless of which shape is in effect, the kiosk unit's TTY handling
+# MUST NOT wipe the retained framebuffer, and the unit's ordering MUST
+# NOT gate compositor start on network-online (which would reintroduce
+# the ~8-9 s dark hold that seamless handoff exists to eliminate).
+# ---------------------------------------------------------------------------
+
+if systemctl cat evo-kiosk.service >/dev/null 2>&1; then
+  # Deploy shape: either retain-splash drop-in OR kiosk owns quit
+  # (or both, during rollout). Fail only if neither is present.
+  KIOSK_CONFLICTS_QUIT=false
+  if systemctl show -p Conflicts --value evo-kiosk.service 2>/dev/null \
+        | tr ' ' '\n' | grep -qx 'plymouth-quit.service'; then
+    KIOSK_CONFLICTS_QUIT=true
+  fi
+  RETAIN_DROPIN_ACTIVE=false
+  if systemctl show -p ExecStart --value plymouth-quit.service 2>/dev/null \
+        | grep -q -- '--retain-splash'; then
+    RETAIN_DROPIN_ACTIVE=true
+  fi
+  check "handoff owner present (retain-splash drop-in OR kiosk Conflicts plymouth-quit)" \
+    "[ \"$KIOSK_CONFLICTS_QUIT\" = 'true' ] || [ \"$RETAIN_DROPIN_ACTIVE\" = 'true' ]"
+
+  # VT-wipe flags: TTYReset and TTYVTDisallocate MUST both be `no` on
+  # the same VT as the splash (tty1). Either at yes clears the
+  # framebuffer during kiosk startup and destroys the retained splash
+  # regardless of the drop-in.
+  check "evo-kiosk TTYReset=no"          \
+    "[ \"\$(systemctl show -p TTYReset --value evo-kiosk.service 2>/dev/null)\" = 'no' ]"
+  check "evo-kiosk TTYVTDisallocate=no"  \
+    "[ \"\$(systemctl show -p TTYVTDisallocate --value evo-kiosk.service 2>/dev/null)\" = 'no' ]"
+  check "evo-kiosk TTYPath=/dev/tty1"    \
+    "[ \"\$(systemctl show -p TTYPath --value evo-kiosk.service 2>/dev/null)\" = '/dev/tty1' ]"
+
+  # Ordering: kiosk MUST NOT gate on network-online. evo-ui.service
+  # ordering is the same rule (kiosk usually After=evo-ui too).
+  check "evo-kiosk After= does not include network-online.target" \
+    "! systemctl show -p After --value evo-kiosk.service 2>/dev/null | tr ' ' '\n' | grep -qx 'network-online.target'"
+  if systemctl cat evo-ui.service >/dev/null 2>&1; then
+    check "evo-ui After= does not include network-online.target" \
+      "! systemctl show -p After --value evo-ui.service 2>/dev/null | tr ' ' '\n' | grep -qx 'network-online.target'"
+  fi
+else
+  printf '  skip  evo-kiosk.service not installed (headless target)\n'
+fi
+
 if [ "$fail" -eq 0 ]; then
   printf '\nall checks passed\n'
 else
