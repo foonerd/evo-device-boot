@@ -230,7 +230,7 @@ Two coordinated fixes close it:
    restoring the console, so the retained image holds until the
    compositor's first modeset paints over it - a seamless dissolve, no
    black frame, however long the compositor takes.
-2. The kiosk (`evo-kiosk-eng`) and the UI runtime (`evo-ui.service`) are
+2. The kiosk (`evo-kiosk.service`) and the UI runtime (`evo-ui.service`) are
    re-gated off `network-online.target` onto the loopback server + DRM, so
    the gap the retained splash must cover is a second or two rather than
    the ~9s the network-online wait imposed.
@@ -248,7 +248,7 @@ shape is more robust when the compositor takes several seconds to bring
 its DRM master up (which can happen on VM targets, slow Pi bring-up, or
 labwc first-modeset paths that fire `wlr-randr` after `exec`).
 
-The DM shape lives in `evo-kiosk-eng` and looks like this:
+The DM shape lives in the kiosk workspace and looks like this:
 
     # evo-kiosk.service
     [Unit]
