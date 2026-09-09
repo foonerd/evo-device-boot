@@ -1,0 +1,96 @@
+# Mint evo-device-boot theme into foonerd/evo-device-audio-artefacts.
+name: publish-pieces
+
+"on":
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "What to mint"
+        type: choice
+        options: [all, evo-device-boot]
+        default: all
+
+concurrency:
+  group: publish-pieces
+  cancel-in-progress: false
+
+env:
+  ARTEFACTS_REPO: foonerd/evo-device-audio-artefacts
+  COMMIT_USER: evo-device-boot CI
+  COMMIT_EMAIL: ci@evoframework.org
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Stage boot theme
+        env:
+          PLUGIN_SIGNING_KEY_PEM: ${{ secrets.PLUGIN_SIGNING_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          SRC=/tmp/boot-src
+          mkdir -p "$SRC"
+          for sub in scripts plymouth fbcon-logo grub-theme systemd tools; do
+            [ -d "$sub" ] && cp -a "$sub" "$SRC/"
+          done
+          for f in DESIGN.md README.md VERSION; do
+            [ -f "$f" ] && cp -a "$f" "$SRC/"
+          done
+          umask 077
+          printenv PLUGIN_SIGNING_KEY_PEM > /tmp/key.pem
+          export EVO_PLUGIN_SIGNING_KEY=/tmp/key.pem
+          OUT=/tmp/stage/bundles/evo-device-boot/${VERSION}
+          mkdir -p "$OUT"
+          bash scripts/release/pack-signed-tree.sh \
+            --piece evo-device-boot --version "$VERSION" --kind boot-theme \
+            --src "$SRC" --out-dir "$OUT"
+          shred -u /tmp/key.pem
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: boot-tree
+          path: /tmp/stage/bundles/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: boot-tree
+          path: /tmp/stage/bundles/
+
+      - name: Push append-only slot
+        env:
+          GH_TOKEN: ${{ secrets.ARTEFACTS_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "${COMMIT_USER}"
+          git config --global user.email "${COMMIT_EMAIL}"
+          ART=/tmp/artefacts
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${ARTEFACTS_REPO}.git" "$ART"
+          cd "$ART"
+          NEW=()
+          while IFS= read -r -d '' src; do
+            rel="${src#/tmp/stage/}"
+            dest="$ART/$rel"
+            if [ -e "$dest" ]; then
+              echo "::warning::Skipping $rel — version slot already published"
+              continue
+            fi
+            mkdir -p "$(dirname "$dest")"
+            cp -a "$src" "$dest"
+            NEW+=("$rel")
+          done < <(find /tmp/stage/bundles -type f -print0)
+          if [ ${#NEW[@]} -eq 0 ]; then
+            echo "No new pieces to publish."
+            exit 0
+          fi
+          git add bundles/
+          git commit -m "publish: evo-device-boot piece"
+          git push origin main
